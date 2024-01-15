@@ -1,8 +1,9 @@
-# Basic example of the simulation without wakefields
+# Basic example of the simulation with wakefields
 # %%
 import h5py
 import yaml
 import os
+xp.enable_pyheadtail_interface()
 import xtrack as xt
 import xpart as xp
 import matplotlib.pyplot as plt
@@ -10,6 +11,13 @@ import numpy as np
 import json
 import xobjects as xo
 from scipy.interpolate import interp1d
+from PyHEADTAIL.particles.slicing import UniformBinSlicer
+from PyHEADTAIL.trackers.detuners import Chromaticity, AmplitudeDetuning
+from PyHEADTAIL.trackers.transverse_tracking import TransverseMap
+from PyHEADTAIL.trackers.simple_long_tracking import RFSystems, LinearMap
+from PyHEADTAIL.monitors.monitors import BunchMonitor, SliceMonitor, ParticleMonitor
+from PyHEADTAIL.feedback.transverse_damper import TransverseDamper
+from PyHEADTAIL.impedances.wakes import CircularResonator, WakeTable, WakeField
 from scipy.optimize import curve_fit
 import time
 
