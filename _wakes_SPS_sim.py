@@ -67,8 +67,8 @@ fname_line = '/afs/cern.ch/work/a/afornara/public/New_Crab_Cavities_MD/sps-md-cc
 with open(fname_line+'line_SPS_Q26.json', 'r') as fid:
     input_data = json.load(fid)
 #  We choose the context, CPU is default
-# ctx = xo.ContextCupy()
-ctx = xo.ContextCpu()
+ctx = xo.ContextCupy(device = 2)
+# ctx = xo.ContextCpu()
 line = xt.Line.from_dict(input_data)
 # We rotate the line to measure everything at the WS
 line = line.cycle('bwsrc.51637')
@@ -168,6 +168,10 @@ if(activate_wakefields):
     wake_field_1 = WakeField(slicer_for_wakefields, ww1)#, beta_x=beta_x, beta_y=beta_y)
     wake_field_2 = WakeField(slicer_for_wakefields, ww2)#, beta_x=beta_x, beta_y=beta_y)
     wake_field_3 = WakeField(slicer_for_wakefields, ww3)#, beta_x=beta_x, beta_y=beta_y)
+    wake_field_1.needs_cpu = True
+    wake_field_2.needs_cpu = True
+    wake_field_3.needs_cpu = True
+
     line.append_element(wake_field_1, 'wake_field_1')
     line.append_element(wake_field_2, 'wake_field_2')
     line.append_element(wake_field_3, 'wake_field_3')
@@ -175,7 +179,7 @@ if(activate_wakefields):
     twiss = line.twiss(particle_ref)
 
 # %%
-N_turns = 100
+N_turns = 10000
 print(f'Number of turns: {N_turns}')
 noise_level = -104.0 # dBc/Hz
 Gyy = measured_psd_2_Gyy(noise_level)
@@ -228,11 +232,29 @@ EYS = []
 
 # Prepare the Gaussian Distribution
 bunch_intensity = 3.0e10
-N_particles = 1000
-particles = xp.generate_matched_gaussian_bunch(
+N_particles = 20000
+n_macroparticles = 20000
+
+particles_gauss = xp.generate_matched_gaussian_bunch(
                 num_particles=N_particles, total_intensity_particles=bunch_intensity,
                 nemitt_x=normal_emitt_x, nemitt_y=normal_emitt_y, sigma_z=sigma_z,
-                particle_ref=particle_ref, line=line)
+                particle_ref=particle_ref, line=line, _context=ctx)
+
+# %%
+particles = xp.Particles(
+    _context=ctx,
+    circumference=circumference,
+    particlenumber_per_mp=bunch_intensity / n_macroparticles,
+    q0=1,
+    mass0= xp.PROTON_MASS_EV,
+    gamma0=particle_ref.gamma0[0],
+    x= ctx.nparray_from_context_array(particles_gauss.x),
+    px= ctx.nparray_from_context_array(particles_gauss.px),
+    y= ctx.nparray_from_context_array(particles_gauss.y),
+    py= ctx.nparray_from_context_array(particles_gauss.py),
+    zeta= ctx.nparray_from_context_array(particles_gauss.zeta),
+    delta= ctx.nparray_from_context_array(particles_gauss.delta),
+)
 
 # %%
 #Print out the time of the simulation importing time
@@ -255,7 +277,7 @@ for ii in range(N_turns):
     ey = emittance(ys_0[cut],pys_0[cut],zeta_0[cut],delta_0[cut],dy,dpy,interp_ys,interp_pys)*particle_ref.gamma0*particle_ref.beta0
     exs[ii] = ex[0]
     eys[ii] = ey[0]
-    if(ii%10== 0):
+    if(ii%1000== 0):
         #print minutes
         print(f'Turn number {ii} of {N_turns}')
         print("--- %s ---" % (time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))))
@@ -267,6 +289,5 @@ popt, pcov = curve_fit(linear_fit, turns, exs*1e6)
 print(f'Ex growth rate = {popt[0]*60*60*frev:.2f} um/hour')
 popt, pcov = curve_fit(linear_fit, turns, eys*1e6)
 print(f'Ey growth rate = {popt[0]*60*60*frev:.2f} um/hour')
-
 
 # %%
