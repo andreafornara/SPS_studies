@@ -3,9 +3,9 @@
 import h5py
 import yaml
 import os
-xp.enable_pyheadtail_interface()
 import xtrack as xt
 import xpart as xp
+xp.enable_pyheadtail_interface()
 import matplotlib.pyplot as plt
 import numpy as np
 import json
@@ -141,6 +141,38 @@ dpy = twiss['dpy'][0]
 sigma_z = c_light*tau/4
 sigma_x = np.sqrt(twiss['betx'][0]*normal_emitt_x/(particle_ref.gamma0*particle_ref.beta0))[0]
 sigma_y = np.sqrt(twiss['bety'][0]*normal_emitt_x/(particle_ref.gamma0*particle_ref.beta0))[0]
+
+# %%
+activate_wakefields = True
+if(activate_wakefields):
+    print('Activating wakefields')
+    line.discard_tracker()
+    n_slices = 500 # 500
+    slicer_for_wakefields = UniformBinSlicer(n_slices, z_cuts=(-3.*sigma_z, 3.*sigma_z))#,circumference=circumference, h_bunch=h1)
+    n_turns_wake = 1 # for the moment we consider that the wakefield decays after 1 turn
+    #wakefile0 = ('/afs/cern.ch/work/n/natriant/private/pyheadtail_example_crabcavity/wakefields/SPS_complete_wake_model_2018_Q26.txt')
+    path2wakefields = 'wakefields/'
+    wakefile1 = (f'{path2wakefields}step_analytical_wake.txt')
+    wakefile2 = (f'{path2wakefields}Analytical_Wall_Q26_270GeV.txt')
+    wakefile3 = (f'{path2wakefields}SPS_wake_model_with_EF_BPH_BPV_RF200_RF800_kicker_ZS_2018_Q26.txt')
+    ww1 = WakeTable(wakefile1, ['time', 'dipole_y'], n_turns_wake=n_turns_wake) #step transition
+    ww2 = WakeTable(wakefile2, ['time', 'dipole_x', 'dipole_y', 'quadrupole_x', 'quadrupole_y'], n_turns_wake=43) #wall impedance
+    ww3 = WakeTable(wakefile3, ['time', 'dipole_x', 'dipole_y', 'quadrupole_x', 'quadrupole_y'], n_turns_wake=n_turns_wake) #everything else
+    # multiply with a factor 2
+    ww1.wake_table['dipole_y'] = 2*ww1.wake_table['dipole_y'] # for the analytical step wake
+    ww2.wake_table['dipole_y'] = 1.034*ww2.wake_table['dipole_y'] # for the analytical step wake
+    ww2.wake_table['dipole_x'] = 1.034*ww2.wake_table['dipole_x'] # for the analytical step wake
+    ww2.wake_table['quadrupole_y'] = 1.034*ww2.wake_table['quadrupole_y'] # for the analytical step wake
+    ww2.wake_table['quadrupole_x'] = 1.034*ww2.wake_table['quadrupole_x'] # for the analytical step wake
+    #wake_field_0 = WakeField(slicer_for_wakefields, ww0)#, beta_x=beta_x, beta_y=beta_y)
+    wake_field_1 = WakeField(slicer_for_wakefields, ww1)#, beta_x=beta_x, beta_y=beta_y)
+    wake_field_2 = WakeField(slicer_for_wakefields, ww2)#, beta_x=beta_x, beta_y=beta_y)
+    wake_field_3 = WakeField(slicer_for_wakefields, ww3)#, beta_x=beta_x, beta_y=beta_y)
+    line.append_element(wake_field_1, 'wake_field_1')
+    line.append_element(wake_field_2, 'wake_field_2')
+    line.append_element(wake_field_3, 'wake_field_3')
+    line.build_tracker(_context=ctx)
+    twiss = line.twiss(particle_ref)
 
 # %%
 N_turns = 100
