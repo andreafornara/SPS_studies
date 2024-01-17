@@ -3,6 +3,7 @@
 import h5py
 import yaml
 import os
+import argparse
 import xtrack as xt
 import xpart as xp
 xp.enable_pyheadtail_interface()
@@ -20,47 +21,16 @@ from PyHEADTAIL.feedback.transverse_damper import TransverseDamper
 from PyHEADTAIL.impedances.wakes import CircularResonator, WakeTable, WakeField
 from scipy.optimize import curve_fit
 import time
+from functions import *
 
-# %%
-# The emittance is defined by taking into account both the longitudinal position and delta
-# A linear interpolation is performed to obtain the crabbing function for the correction of the emittance
-def emittance(x,px,zeta,delta,dx,dpx,interp_x,interp_px):
-    x_np = np.array(x)
-    px_np= np.array(px)
-    x_np = np.array(x - delta*dx-interp_x(zeta))
-    px_np = np.array(px - delta*dpx-interp_px(zeta))
+parser = argparse.ArgumentParser()
+parser.add_argument("--yaml_path", type=str, required=True)
 
-    x_mean_2 = np.dot(x_np,x_np)/len(x)
-    px_mean_2 = np.dot(px_np,px_np)/len(x)
-    x_px_mean = np.dot(x_np,px_np)/len(x)
+args = parser.parse_args()
 
-    emitt = np.sqrt(x_mean_2*px_mean_2-(x_px_mean)**2)
-
-    return emitt
-
-# We convert the measured PSD to Gyy
-def measured_psd_2_Gyy(psd_meas):
-    # see notes_on_PSD.png
-    L = 10**(psd_meas/10)
-    Gyy = 2*L
-    return Gyy
-
-# We convert the measured Gyy to PSD
-def Gyy_2_measured_psd(Gyy):
-    # see notes_on_PSD.png
-    L = Gyy/2
-    psd_meas = 10*np.log10(L)
-    return psd_meas
-
-# Simple function to convert from rad to deg
-def from_rad_to_deg(phi_rad):
-    phi_deg = phi_rad*180/np.pi
-    return phi_deg
-
-# Simple linear fit
-def linear_fit(x, slope, intercept):
-    return slope*x + intercept
-
+# open the yaml file and get the parameters of the simulation
+with open(args.yaml_path, "r", encoding="utf-8") as f:
+    parameters = yaml.safe_load(f)
 # %%
 # Load the lattice, this is an SPS in the conditions of the MD
 fname_line = '/afs/cern.ch/work/a/afornara/public/New_Crab_Cavities_MD/sps-md-ccnoise/MD_scripts/sps_madx/'
@@ -76,9 +46,9 @@ line.build_tracker(_context=ctx)
 # MD was performed at 270 GeV
 particle_ref = xp.Particles(p0c=270e9, q0=1, mass0=xp.PROTON_MASS_EV)
 # If we want to change the octupole current we just need to activate this flag
-change_octupole = True
+change_octupole = parameters['change_octupole']
 # Desired octupole current to be set
-klod = 30.0
+klod = parameters['klod']
 if(change_octupole):
     print(f'Changing LOD octupole currents to {klod}/m^4')
     for elem in line.element_dict :
@@ -96,43 +66,8 @@ tau = 1.83e-9
 normal_emitt_x = 2.0e-6
 normal_emitt_y = 2.0e-6
 h = 4620
-
-# %%
-# This section is used to control the RF frequency and voltage of the SPS
-# Main RF Systems and Crab Cavity
-Pilot_Accelerating_Cavities = False
-if(Pilot_Accelerating_Cavities):
-    MV_distribution = 7.6e6/18
-    my_dict = line.to_dict()
-    for ii in line.to_dict()['elements']:
-        if(my_dict['elements'][ii]["__class__"] == 'Cavity'):
-            if(ii.startswith('act')):
-                    line.element_dict[ii].frequency = h*frev
-                    line.element_dict[ii].voltage = MV_distribution
-                    line.element_dict[ii].lag = 180
-            if(ii.startswith('acl')):
-                    line.element_dict[ii].frequency = 4*h*frev
-                    line.element_dict[ii].voltage = 0#0.3e6
-                    line.element_dict[ii].lag = 180
-    twiss = line.twiss(particle_ref)
-# By default the crab cavity is ON with 1 MV
-Pilot_Crab_Cavity = False
-MV_CC = 1.0
-E0_MeV = particle_ref.p0c[0]*1e-6
-ksl = MV_CC/E0_MeV
-if(Pilot_Crab_Cavity):
-    line.element_dict['cravity.1'].frequency = 2*h*frev
-    line.element_dict['cravity.1'].voltage = MV_CC*1e6
-    line.element_dict['cravity.1'].lag = 0
-    line.element_dict['cravity.1'].ksl = ksl
-    line.element_dict['cravity.1'].knl = 0
-    line.element_dict['cravity.1'].ps = 90
-    line.element_dict['cravity.1'].pn = 0
-    twiss = line.twiss(particle_ref)
-#Check the RF frequency and voltage
-print(f'RF frequency = {line.element_dict["cravity.1"].frequency} Hz')
-print(f'RF ksl = {line.element_dict["cravity.1"].ksl}')
-
+ksl = line.element_dict['cravity.1'].ksl
+ps = line.element_dict['cravity.1'].ps
 # %%
 dx = twiss['dx'][0]
 dpx = twiss['dpx'][0]
@@ -143,7 +78,7 @@ sigma_x = np.sqrt(twiss['betx'][0]*normal_emitt_x/(particle_ref.gamma0*particle_
 sigma_y = np.sqrt(twiss['bety'][0]*normal_emitt_x/(particle_ref.gamma0*particle_ref.beta0))[0]
 
 # %%
-activate_wakefields = True
+activate_wakefields = parameters['activate_wakefields']
 if(activate_wakefields):
     print('Activating wakefields')
     line.discard_tracker()
@@ -179,17 +114,29 @@ if(activate_wakefields):
     twiss = line.twiss(particle_ref)
 
 # %%
-N_turns = 10000
+N_turns = parameters['N_turns']
 print(f'Number of turns: {N_turns}')
-noise_level = -104.0 # dBc/Hz
+noise_level = parameters['noise_level'] # dBc/Hz
 Gyy = measured_psd_2_Gyy(noise_level)
 Syy = Gyy/2 # rad^2/Hz
 print(f'Noise level: {Syy} rad^2/Hz')
-amp_noise = Syy*frev
-print(f'Amplitude noise: {amp_noise} rad^2')
-amp_noise_deg = from_rad_to_deg(np.sqrt(amp_noise))
-#generate a normal distribution of amplitude noise for N_turns
-amp_noise_list = np.random.normal(0, np.sqrt(amp_noise), N_turns)
+amplitude_noise_flag = parameters['amplitude_noise']
+phase_noise_flag = parameters['phase_noise']
+if(amplitude_noise_flag):
+    print('Amplitude noise is ON')
+    amp_noise = Syy*frev
+    print(f'Amplitude noise: {amp_noise} rad^2')
+    amp_noise_list = np.random.normal(0, np.sqrt(amp_noise), N_turns)
+    print(f'Amplitude noise list: {amp_noise_list}')
+    print('sigma: ', np.std(amp_noise_list), 'rad')
+if(phase_noise_flag):
+    print('Phase noise is ON')
+    ph_noise = Syy*frev
+    print(f'Phase noise: {ph_noise} rad^2')
+    ph_noise_deg = from_rad_to_deg(np.sqrt(ph_noise))
+    ph_noise_list = np.random.normal(0, ph_noise_deg, N_turns)
+    print(f'Phase noise list: {ph_noise_list}')
+    print('sigma: ', np.std(ph_noise_list), 'deg')
 # %%
 # Calculating the Crab Dispersion at the BWS location via 4D Twiss
 at_point = 0
@@ -232,29 +179,33 @@ EYS = []
 
 # Prepare the Gaussian Distribution
 bunch_intensity = 3.0e10
-N_particles = 20000
-n_macroparticles = 20000
+N_particles = parameters['N_particles']
 
-particles_gauss = xp.generate_matched_gaussian_bunch(
-                num_particles=N_particles, total_intensity_particles=bunch_intensity,
-                nemitt_x=normal_emitt_x, nemitt_y=normal_emitt_y, sigma_z=sigma_z,
-                particle_ref=particle_ref, line=line, _context=ctx)
-
-# %%
-particles = xp.Particles(
-    _context=ctx,
-    circumference=circumference,
-    particlenumber_per_mp=bunch_intensity / n_macroparticles,
-    q0=1,
-    mass0= xp.PROTON_MASS_EV,
-    gamma0=particle_ref.gamma0[0],
-    x= ctx.nparray_from_context_array(particles_gauss.x),
-    px= ctx.nparray_from_context_array(particles_gauss.px),
-    y= ctx.nparray_from_context_array(particles_gauss.y),
-    py= ctx.nparray_from_context_array(particles_gauss.py),
-    zeta= ctx.nparray_from_context_array(particles_gauss.zeta),
-    delta= ctx.nparray_from_context_array(particles_gauss.delta),
-)
+if(activate_wakefields):
+    particles_gauss = xp.generate_matched_gaussian_bunch(
+                    num_particles=N_particles, total_intensity_particles=bunch_intensity,
+                    nemitt_x=normal_emitt_x, nemitt_y=normal_emitt_y, sigma_z=sigma_z,
+                    particle_ref=particle_ref, line=line, _context=ctx)
+    
+    n_macroparticles = 20000
+    particles = xp.Particles(
+        _context=ctx,
+        circumference=circumference,
+        particlenumber_per_mp=bunch_intensity / n_macroparticles,
+        q0=1,
+        mass0= xp.PROTON_MASS_EV,
+        gamma0=particle_ref.gamma0[0],
+        x= ctx.nparray_from_context_array(particles_gauss.x),
+        px= ctx.nparray_from_context_array(particles_gauss.px),
+        y= ctx.nparray_from_context_array(particles_gauss.y),
+        py= ctx.nparray_from_context_array(particles_gauss.py),
+        zeta= ctx.nparray_from_context_array(particles_gauss.zeta),
+        delta= ctx.nparray_from_context_array(particles_gauss.delta))
+else:
+    particles = xp.generate_matched_gaussian_bunch(
+                    num_particles=N_particles, total_intensity_particles=bunch_intensity,
+                    nemitt_x=normal_emitt_x, nemitt_y=normal_emitt_y, sigma_z=sigma_z,
+                    particle_ref=particle_ref, line=line, _context=ctx)
 
 # %%
 #Print out the time of the simulation importing time
@@ -263,7 +214,10 @@ exs = np.zeros(N_turns)
 eys = np.zeros(N_turns)
 for ii in range(N_turns):
     line.track(particles)
-    line.element_dict['cravity.1'].ksl = ksl*(1 + amp_noise_list[ii])
+    if(amplitude_noise_flag):
+        line.element_dict['cravity.1'].ksl = ksl*(1 + amp_noise_list[ii])
+    if(phase_noise_flag):
+        line.element_dict['cravity.1'].ps = ps + ph_noise_list[ii]
     # Check the emittance
     xs_0 = ctx.nparray_from_context_array(particles.x)
     pxs_0 = ctx.nparray_from_context_array(particles.px)

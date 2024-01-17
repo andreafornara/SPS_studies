@@ -1,0 +1,9 @@
+# 
+change_octupole: True
+klod: 30.0
+activate_wakefields: True
+N_turns: 10
+N_particles: 20000
+noise_level: -98 # dBc/Hz
+amplitude_noise: False
+phase_noise: True

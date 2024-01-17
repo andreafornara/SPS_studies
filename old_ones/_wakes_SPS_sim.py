@@ -1,57 +1,26 @@
-# Basic example of the simulation without wakefields
+# Basic example of the simulation with wakefields
 # %%
 import h5py
 import yaml
 import os
 import xtrack as xt
 import xpart as xp
+xp.enable_pyheadtail_interface()
 import matplotlib.pyplot as plt
 import numpy as np
 import json
 import xobjects as xo
 from scipy.interpolate import interp1d
+from PyHEADTAIL.particles.slicing import UniformBinSlicer
+from PyHEADTAIL.trackers.detuners import Chromaticity, AmplitudeDetuning
+from PyHEADTAIL.trackers.transverse_tracking import TransverseMap
+from PyHEADTAIL.trackers.simple_long_tracking import RFSystems, LinearMap
+from PyHEADTAIL.monitors.monitors import BunchMonitor, SliceMonitor, ParticleMonitor
+from PyHEADTAIL.feedback.transverse_damper import TransverseDamper
+from PyHEADTAIL.impedances.wakes import CircularResonator, WakeTable, WakeField
 from scipy.optimize import curve_fit
 import time
-
-# %%
-# The emittance is defined by taking into account both the longitudinal position and delta
-# A linear interpolation is performed to obtain the crabbing function for the correction of the emittance
-def emittance(x,px,zeta,delta,dx,dpx,interp_x,interp_px):
-    x_np = np.array(x)
-    px_np= np.array(px)
-    x_np = np.array(x - delta*dx-interp_x(zeta))
-    px_np = np.array(px - delta*dpx-interp_px(zeta))
-
-    x_mean_2 = np.dot(x_np,x_np)/len(x)
-    px_mean_2 = np.dot(px_np,px_np)/len(x)
-    x_px_mean = np.dot(x_np,px_np)/len(x)
-
-    emitt = np.sqrt(x_mean_2*px_mean_2-(x_px_mean)**2)
-
-    return emitt
-
-# We convert the measured PSD to Gyy
-def measured_psd_2_Gyy(psd_meas):
-    # see notes_on_PSD.png
-    L = 10**(psd_meas/10)
-    Gyy = 2*L
-    return Gyy
-
-# We convert the measured Gyy to PSD
-def Gyy_2_measured_psd(Gyy):
-    # see notes_on_PSD.png
-    L = Gyy/2
-    psd_meas = 10*np.log10(L)
-    return psd_meas
-
-# Simple function to convert from rad to deg
-def from_rad_to_deg(phi_rad):
-    phi_deg = phi_rad*180/np.pi
-    return phi_deg
-
-# Simple linear fit
-def linear_fit(x, slope, intercept):
-    return slope*x + intercept
+from functions import *
 
 # %%
 # Load the lattice, this is an SPS in the conditions of the MD
@@ -59,8 +28,8 @@ fname_line = '/afs/cern.ch/work/a/afornara/public/New_Crab_Cavities_MD/sps-md-cc
 with open(fname_line+'line_SPS_Q26.json', 'r') as fid:
     input_data = json.load(fid)
 #  We choose the context, CPU is default
-# ctx = xo.ContextCupy()
-ctx = xo.ContextCpu()
+ctx = xo.ContextCupy(device = 2)
+# ctx = xo.ContextCpu()
 line = xt.Line.from_dict(input_data)
 # We rotate the line to measure everything at the WS
 line = line.cycle('bwsrc.51637')
@@ -135,7 +104,43 @@ sigma_x = np.sqrt(twiss['betx'][0]*normal_emitt_x/(particle_ref.gamma0*particle_
 sigma_y = np.sqrt(twiss['bety'][0]*normal_emitt_x/(particle_ref.gamma0*particle_ref.beta0))[0]
 
 # %%
-N_turns = 100
+activate_wakefields = True
+if(activate_wakefields):
+    print('Activating wakefields')
+    line.discard_tracker()
+    n_slices = 500 # 500
+    slicer_for_wakefields = UniformBinSlicer(n_slices, z_cuts=(-3.*sigma_z, 3.*sigma_z))#,circumference=circumference, h_bunch=h1)
+    n_turns_wake = 1 # for the moment we consider that the wakefield decays after 1 turn
+    #wakefile0 = ('/afs/cern.ch/work/n/natriant/private/pyheadtail_example_crabcavity/wakefields/SPS_complete_wake_model_2018_Q26.txt')
+    path2wakefields = 'wakefields/'
+    wakefile1 = (f'{path2wakefields}step_analytical_wake.txt')
+    wakefile2 = (f'{path2wakefields}Analytical_Wall_Q26_270GeV.txt')
+    wakefile3 = (f'{path2wakefields}SPS_wake_model_with_EF_BPH_BPV_RF200_RF800_kicker_ZS_2018_Q26.txt')
+    ww1 = WakeTable(wakefile1, ['time', 'dipole_y'], n_turns_wake=n_turns_wake) #step transition
+    ww2 = WakeTable(wakefile2, ['time', 'dipole_x', 'dipole_y', 'quadrupole_x', 'quadrupole_y'], n_turns_wake=43) #wall impedance
+    ww3 = WakeTable(wakefile3, ['time', 'dipole_x', 'dipole_y', 'quadrupole_x', 'quadrupole_y'], n_turns_wake=n_turns_wake) #everything else
+    # multiply with a factor 2
+    ww1.wake_table['dipole_y'] = 2*ww1.wake_table['dipole_y'] # for the analytical step wake
+    ww2.wake_table['dipole_y'] = 1.034*ww2.wake_table['dipole_y'] # for the analytical step wake
+    ww2.wake_table['dipole_x'] = 1.034*ww2.wake_table['dipole_x'] # for the analytical step wake
+    ww2.wake_table['quadrupole_y'] = 1.034*ww2.wake_table['quadrupole_y'] # for the analytical step wake
+    ww2.wake_table['quadrupole_x'] = 1.034*ww2.wake_table['quadrupole_x'] # for the analytical step wake
+    #wake_field_0 = WakeField(slicer_for_wakefields, ww0)#, beta_x=beta_x, beta_y=beta_y)
+    wake_field_1 = WakeField(slicer_for_wakefields, ww1)#, beta_x=beta_x, beta_y=beta_y)
+    wake_field_2 = WakeField(slicer_for_wakefields, ww2)#, beta_x=beta_x, beta_y=beta_y)
+    wake_field_3 = WakeField(slicer_for_wakefields, ww3)#, beta_x=beta_x, beta_y=beta_y)
+    wake_field_1.needs_cpu = True
+    wake_field_2.needs_cpu = True
+    wake_field_3.needs_cpu = True
+
+    line.append_element(wake_field_1, 'wake_field_1')
+    line.append_element(wake_field_2, 'wake_field_2')
+    line.append_element(wake_field_3, 'wake_field_3')
+    line.build_tracker(_context=ctx)
+    twiss = line.twiss(particle_ref)
+
+# %%
+N_turns = 10
 print(f'Number of turns: {N_turns}')
 noise_level = -104.0 # dBc/Hz
 Gyy = measured_psd_2_Gyy(noise_level)
@@ -188,11 +193,29 @@ EYS = []
 
 # Prepare the Gaussian Distribution
 bunch_intensity = 3.0e10
-N_particles = 1000
-particles = xp.generate_matched_gaussian_bunch(
+N_particles = 20000
+n_macroparticles = 20000
+
+particles_gauss = xp.generate_matched_gaussian_bunch(
                 num_particles=N_particles, total_intensity_particles=bunch_intensity,
                 nemitt_x=normal_emitt_x, nemitt_y=normal_emitt_y, sigma_z=sigma_z,
-                particle_ref=particle_ref, line=line)
+                particle_ref=particle_ref, line=line, _context=ctx)
+
+# %%
+particles = xp.Particles(
+    _context=ctx,
+    circumference=circumference,
+    particlenumber_per_mp=bunch_intensity / n_macroparticles,
+    q0=1,
+    mass0= xp.PROTON_MASS_EV,
+    gamma0=particle_ref.gamma0[0],
+    x= ctx.nparray_from_context_array(particles_gauss.x),
+    px= ctx.nparray_from_context_array(particles_gauss.px),
+    y= ctx.nparray_from_context_array(particles_gauss.y),
+    py= ctx.nparray_from_context_array(particles_gauss.py),
+    zeta= ctx.nparray_from_context_array(particles_gauss.zeta),
+    delta= ctx.nparray_from_context_array(particles_gauss.delta),
+)
 
 # %%
 #Print out the time of the simulation importing time
@@ -215,7 +238,7 @@ for ii in range(N_turns):
     ey = emittance(ys_0[cut],pys_0[cut],zeta_0[cut],delta_0[cut],dy,dpy,interp_ys,interp_pys)*particle_ref.gamma0*particle_ref.beta0
     exs[ii] = ex[0]
     eys[ii] = ey[0]
-    if(ii%10== 0):
+    if(ii%1000== 0):
         #print minutes
         print(f'Turn number {ii} of {N_turns}')
         print("--- %s ---" % (time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))))
@@ -227,6 +250,5 @@ popt, pcov = curve_fit(linear_fit, turns, exs*1e6)
 print(f'Ex growth rate = {popt[0]*60*60*frev:.2f} um/hour')
 popt, pcov = curve_fit(linear_fit, turns, eys*1e6)
 print(f'Ey growth rate = {popt[0]*60*60*frev:.2f} um/hour')
-
 
 # %%
