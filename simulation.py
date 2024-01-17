@@ -36,9 +36,15 @@ with open(args.yaml_path, "r", encoding="utf-8") as f:
 fname_line = '/afs/cern.ch/work/a/afornara/public/New_Crab_Cavities_MD/sps-md-ccnoise/MD_scripts/sps_madx/'
 with open(fname_line+'line_SPS_Q26.json', 'r') as fid:
     input_data = json.load(fid)
-#  We choose the context, CPU is default
-ctx = xo.ContextCupy(device = 2)
-# ctx = xo.ContextCpu()
+# We choose the context
+GPU_flag = parameters['GPU']
+if(GPU_flag):
+    device = parameters['GPU_device']
+    ctx = xo.ContextCupy(device = device)
+    print(f'Using GPU {device}')
+else:
+    ctx = xo.ContextCpu()
+    print('Using CPU, warning, this is VERY slow!')
 line = xt.Line.from_dict(input_data)
 # We rotate the line to measure everything at the WS
 line = line.cycle('bwsrc.51637')

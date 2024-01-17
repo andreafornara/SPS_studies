@@ -1,4 +1,6 @@
 # 
+GPU: False
+GPU_device: 0
 change_octupole: True
 klod: 30.0
 activate_wakefields: True
