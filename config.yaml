@@ -1,11 +1,11 @@
 # 
 GPU: False
 GPU_device: 0
-change_octupole: True
+change_octupole: False
 klod: 30.0
-activate_wakefields: True
+activate_wakefields: False
 N_turns: 10
-N_particles: 20000
+N_particles: 100
 noise_level: -98 # dBc/Hz
 amplitude_noise: False
 phase_noise: True
